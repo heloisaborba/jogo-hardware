@@ -2,6 +2,30 @@
 # 2 jogadores, tabuleiros 8x8, navios 4,3,2
 # Códigos: 0=água, 1=navio, 2=miss, 3=hit
 
+# --- BLOCO DE DEFINIÇÕES (.eqv) ---
+.eqv $t_idx    $s1  # Índice do navio atual
+.eqv $t_ships  $s3  # Endereço do array 'ships'
+.eqv $t_size   $s4  # Tamanho do navio atual
+.eqv $t_row    $s5  # Linha
+.eqv $t_col    $s6  # Coluna
+.eqv $t_orient $s7  # Orientação
+
+# --- CORREÇÃO DE REGISTRADORES (BUG DO LOOP INFINITO) ---
+# Separamos os registradores para não haver conflito dentro dos loops
+.eqv $t_tmp    $t4  # Temporário genérico / Endereços
+.eqv $t_addr   $t4  # Endereço de memória (compartilha com tmp)
+.eqv $t_a      $t4  # Endereço de arrays
+
+.eqv $t_val    $t5  # Valores lidos/escritos na memória
+.eqv $t_cell   $t5  # Valor da célula
+.eqv $t_one    $t5  # Constante 1 (agora em t5 para não conflitar com t_off)
+.eqv $t_const  $t5  # Constantes de comparação
+
+.eqv $t_off    $t6  # Contador de offset (AGORA EXCLUSIVO EM t6)
+.eqv $t_r2     $t7  # Linha temp
+.eqv $t_c2     $t8  # Coluna temp
+.eqv $t_index  $t9  # Índice calculado
+
         .data
 prompt_player:    .asciiz "\nJogador "
 msg_place:        .asciiz " - coloque navio de tamanho "
@@ -20,64 +44,51 @@ ask_continue:     .asciiz "\nPressione ENTER para trocar player...\n"
 newline:          .asciiz "\n"
 
 inbuf:            .space 64
-
-# dois tabuleiros (64 bytes cada)
 board1:           .space 64
 board2:           .space 64
-
-# tamanhos dos navios
 ships:            .word 4,3,2
 num_ships:        .word 3
-
-# counters de células ainda não atingidas
 ships_left1:      .word 0
 ships_left2:      .word 0
 
         .text
         .globl main
+        j main
 
 # ---------------- IO helpers ----------------
 print_str:
-        # a0 = addr
         li $v0,4
         syscall
         jr $ra
 
 read_line:
-        # a0 = buffer, a1 = size
         li $v0,8
         syscall
         jr $ra
 
 print_int:
-        # a0 = int
         li $v0,1
         syscall
         jr $ra
 
 # ---------------- parse coordinate ----------------
-# Usa inbuf; retorna v0=row(0..7), v1=col(0..7) ; se erro v0=-1
 parse_coord:
         la $t0, inbuf
-        lb $t1, 0($t0)          # primeiro char
+        lb $t1, 0($t0)
         beqz $t1, parse_err
-
-        # verificar coluna A-H ou a-h
         li $t2, 'A'
         li $t3, 'H'
         blt $t1, $t2, check_lower
         bgt $t1, $t3, check_lower
-        subu $v1, $t1, $t2      # col = char - 'A'
+        subu $v1, $t1, $t2
         j parse_row
 check_lower:
         li $t2, 'a'
         li $t3, 'h'
         blt $t1, $t2, parse_err
         bgt $t1, $t3, parse_err
-        subu $v1, $t1, $t2      # col = char - 'a'
-
+        subu $v1, $t1, $t2
 parse_row:
-        # avança para o próximo token (número)
         addi $t0, $t0, 1
 skip_spaces:
         lb $t1, 0($t0)
@@ -90,23 +101,20 @@ skip_spaces:
 inc_and_skip:
         addi $t0, $t0, 1
         j skip_spaces
-
 got_digit:
         lb $t1, 0($t0)
         li $t2, '1'
         li $t3, '8'
         blt $t1, $t2, parse_err
         bgt $t1, $t3, parse_err
-        subu $v0, $t1, $t2      # row = digit - '1'
+        subu $v0, $t1, $t2
         jr $ra
-
 parse_err:
         li $v0, -1
         li $v1, -1
         jr $ra
 
 # ---------------- find orientation ----------------
-# usa buffer inbuf; retorna em $t0: 0 horizontal (default), 1 vertical
 find_orient:
         la $t1, inbuf
         li $t0, 0
@@ -132,17 +140,15 @@ setV:
 find_orient_done:
         jr $ra
 
-# ---------------- calc_index row,col -> index ----------------
-# entrada: a0=row, a1=col ; saída v0 = index
+# ---------------- calc_index ----------------
 calc_index:
-        li $t8, 8
-        mul $t2, $a0, $t8
+        li $t0, 8
+        mul $t2, $a0, $t0
         add $v0, $t2, $a1
         jr $ra
 
 # ---------------- init boards ----------------
 init_boards:
-        # zero board1
         la $t0, board1
         li $t1, 64
 zero1:
@@ -152,7 +158,6 @@ zero1:
         addi $t1, $t1, -1
         j zero1
 done1:
-        # zero board2
         la $t0, board2
         li $t1, 64
 zero2:
@@ -162,7 +167,6 @@ zero2:
         addi $t1, $t1, -1
         j zero2
 done2:
-        # set ships_left = 9 (4+3+2)
         li $t0, 9
         la $t1, ships_left1
         sw $t0, 0($t1)
@@ -170,22 +174,22 @@ done2:
         sw $t0, 0($t1)
         jr $ra
 
-# ---------------- place all ships for a board ----------------
-# expects: s0 = address of board (board1 or board2)
-# expects: s2 = player number (1 or 2) for printing
+# ---------------- place all ships ----------------
 place_all_ships:
+        addi $sp, $sp, -4
+        sw $ra, 0($sp)
+
         la $t_ships, ships
-        lw $t_num, num_ships
         li $t_idx, 0
 place_loop:
-        beq $t_idx, $t_num, place_done
-        # load ship size
+        lw $t_tmp, num_ships
+        beq $t_idx, $t_tmp, place_done
+
         sll $t_a, $t_idx, 2
         add $t_a, $t_a, $t_ships
         lw $t_size, 0($t_a)
 
 ask_place:
-        # print "Jogador "
         la $a0, prompt_player
         jal print_str
         move $a0, $s2
@@ -198,24 +202,19 @@ ask_place:
         la $a0, msg_orient
         jal print_str
 
-        # read line
         la $a0, inbuf
         li $a1, 64
         jal read_line
 
-        # parse coordinate
         jal parse_coord
         bltz $v0, bad_input_place
         move $t_row, $v0
         move $t_col, $v1
 
-        # find orientation
         jal find_orient
-        move $t_orient, $t0    # 0 horiz, 1 vert
+        move $t_orient, $t0
 
-        # bounds check: if horiz, col + size <=8 ; if vert, row + size <=8
         beqz $t_orient, check_horiz
-        # vertical
         add $t_tmp, $t_row, $t_size
         li $t_const, 8
         bgt $t_tmp, $t_const, bad_input_place
@@ -230,7 +229,6 @@ check_overlap:
 overlap_loop:
         beq $t_off, $t_size, overlap_ok
         beqz $t_orient, horiz_case
-        # vertical: row+off, col
         add $t_r2, $t_row, $t_off
         move $t_c2, $t_col
         j calc_idx_place
@@ -243,7 +241,6 @@ calc_idx_place:
         move $a1, $t_c2
         jal calc_index
         move $t_index, $v0
-        # address = s0 + index
         move $t_addr, $s0
         add $t_addr, $t_addr, $t_index
         lb $t_val, 0($t_addr)
@@ -257,7 +254,6 @@ overlap_bad:
         j ask_place
 
 overlap_ok:
-        # write ship cells (store 1)
         li $t_off, 0
 write_loop:
         beq $t_off, $t_size, place_next
@@ -276,9 +272,9 @@ calc_idx_write:
         move $t_index, $v0
         move $t_addr, $s0
         add $t_addr, $t_addr, $t_index
-        li $t_one, 1
+        li $t_one, 1          # AGORA USA $t5 (t_one)
         sb $t_one, 0($t_addr)
-        addi $t_off, $t_off, 1
+        addi $t_off, $t_off, 1 # $t6 incrementa sem ser destruído
         j write_loop
 
 place_next:
@@ -293,9 +289,11 @@ bad_input_place:
 place_done:
         la $a0, msg_all_placed
         jal print_str
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
         jr $ra
 
-# ---------------- small clear screen (newlines) ----------------
+# ---------------- clear screen ----------------
 clear_screen:
         li $t0,0
 clear_loop:
@@ -308,14 +306,10 @@ clear_done:
         jr $ra
 
 # ---------------- game loop ----------------
-# s4 = current player number (1 or 2)
-# when s4==1: s0=board1, s3=board2, s5=&ships_left2
-# when s4==2: s0=board2, s3=board1, s5=&ships_left1
 game_loop:
         li $s4, 1
 game_loop_top:
         beq $s4, 1, setup_p1
-        # player 2
         la $s0, board2
         la $s3, board1
         la $s5, ships_left1
@@ -326,7 +320,6 @@ setup_p1:
         la $s5, ships_left2
 
 turn_start:
-        # print "Vez do jogador "
         la $a0, msg_turn
         jal print_str
         move $a0, $s4
@@ -339,46 +332,43 @@ ask_shot:
         li $a1, 64
         jal read_line
 
-        # parse coord
         jal parse_coord
         bltz $v0, shot_bad
         move $t_row, $v0
         move $t_col, $v1
 
-        # calc index
         move $a0, $t_row
         move $a1, $t_col
         jal calc_index
         move $t_index, $v0
 
-        # address on opponent board (s3)
         move $t_addr, $s3
         add $t_addr, $t_addr, $t_index
         lb $t_cell, 0($t_addr)
 
-        # if already shot (2 or 3)
         li $t2, 2
         beq $t_cell, $t2, already_shot
         li $t2, 3
         beq $t_cell, $t2, already_shot
 
-        # if hit (1)
         li $t_one, 1
         beq $t_cell, $t_one, do_hit
 
-        # miss
-        li $t_miss, 2
-        sb $t_miss, 0($t_addr)
+        # Miss
+        li $t_cell, 2          # CORREÇÃO: Usa t_cell ($t5) em vez de t_tmp ($t4)
+        sb $t_cell, 0($t_addr) # t_addr ($t4) ainda contém o endereço correto
         la $a0, msg_miss
         jal print_str
         j after_shot
 
 do_hit:
-        li $t_hit, 3
-        sb $t_hit, 0($t_addr)
+        # Hit
+        li $t_cell, 3          # CORREÇÃO: Usa t_cell ($t5)
+        sb $t_cell, 0($t_addr)
         la $a0, msg_hit
         jal print_str
-        # decrement ships_left
+        
+        # Agora podemos usar t_tmp ($t4) para calcular
         lw $t_tmp, 0($s5)
         addi $t_tmp, $t_tmp, -1
         sw $t_tmp, 0($s5)
@@ -386,14 +376,12 @@ do_hit:
         j after_shot
 
 after_shot:
-        # press enter and switch players
         la $a0, ask_continue
         jal print_str
         la $a0, inbuf
         li $a1, 8
         jal read_line
 
-        # switch player
         beq $s4, 1, set_p2
         li $s4, 1
         j game_loop_top
@@ -423,15 +411,13 @@ declare_winner:
 
 # ---------------- main ----------------
 main:
-        # init boards and counters
         jal init_boards
 
-        # player 1 placement
+        # Player 1 setup
         li $s2, 1
         la $s0, board1
         jal place_all_ships
 
-        # clear screen and wait
         jal clear_screen
         la $a0, ask_continue
         jal print_str
@@ -439,14 +425,12 @@ main:
         li $a1, 8
         jal read_line
 
-        # player 2 placement
+        # Player 2 setup
         li $s2, 2
         la $s0, board2
         jal place_all_ships
 
-        # start game loop
         jal game_loop
 
-        # exit (redundant)
         li $v0,10
         syscall
