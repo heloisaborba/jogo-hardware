@@ -1,6 +1,6 @@
-# Batalha Naval - MIPS (MARS)
+# Batalha Naval - MIPS (MARS) - Versão Final Corrigida
 # 2 jogadores, tabuleiros 8x8, navios 4,3,2
-# Códigos: 0=água, 1=navio, 2=miss, 3=hit
+# Correção: Leitura de coordenadas (Linha/Coluna) corrigida.
 
 # --- BLOCO DE DEFINIÇÕES (.eqv) ---
 .eqv $t_idx    $s1  # Índice do navio atual
@@ -10,38 +10,43 @@
 .eqv $t_col    $s6  # Coluna
 .eqv $t_orient $s7  # Orientação
 
-# --- CORREÇÃO DE REGISTRADORES (BUG DO LOOP INFINITO) ---
-# Separamos os registradores para não haver conflito dentro dos loops
-.eqv $t_tmp    $t4  # Temporário genérico / Endereços
-.eqv $t_addr   $t4  # Endereço de memória (compartilha com tmp)
-.eqv $t_a      $t4  # Endereço de arrays
-
-.eqv $t_val    $t5  # Valores lidos/escritos na memória
-.eqv $t_cell   $t5  # Valor da célula
-.eqv $t_one    $t5  # Constante 1 (agora em t5 para não conflitar com t_off)
-.eqv $t_const  $t5  # Constantes de comparação
-
-.eqv $t_off    $t6  # Contador de offset (AGORA EXCLUSIVO EM t6)
-.eqv $t_r2     $t7  # Linha temp
-.eqv $t_c2     $t8  # Coluna temp
-.eqv $t_index  $t9  # Índice calculado
+# --- REGISTRADORES TEMPORÁRIOS ---
+.eqv $t_tmp    $t4  
+.eqv $t_addr   $t4  
+.eqv $t_a      $t4  
+.eqv $t_val    $t5  
+.eqv $t_cell   $t5  
+.eqv $t_one    $t5  
+.eqv $t_const  $t5  
+.eqv $t_off    $t6  
+.eqv $t_r2     $t7  
+.eqv $t_c2     $t8  
+.eqv $t_index  $t9  
 
         .data
+# --- Strings ---
 prompt_player:    .asciiz "\nJogador "
 msg_place:        .asciiz " - coloque navio de tamanho "
 msg_orient:       .asciiz " (ex: A5 H ou A5 V ou A5): "
 err_invalid:      .asciiz "Entrada invalida. Tente novamente.\n"
 err_overlap:      .asciiz "Posicao invalida (sobrepoe ou ultrapassa borda). Tente outra.\n"
 msg_all_placed:   .asciiz "Todos os navios colocados.\n"
-msg_turn:         .asciiz "\nVez do jogador "
+msg_turn:         .asciiz "\n--------------------------------\nVez do jogador "
 msg_enter_shot:   .asciiz " - informe coordenada do tiro (ex A5): "
-msg_miss:         .asciiz " - Errou!\n"
-msg_hit:          .asciiz " - Acertou!\n"
+msg_miss:         .asciiz " -> Errou! (Agua)\n"
+msg_hit:          .asciiz " -> ACERTOU! (Fogo!)\n"
 msg_already:      .asciiz "Ja atirado nesta posicao. Tente outra coordenada.\n"
 msg_winner:       .asciiz "\n*** Jogador "
 msg_winner2:      .asciiz " venceu! ***\n"
-ask_continue:     .asciiz "\nPressione ENTER para trocar player...\n"
+ask_continue:     .asciiz "\nPressione ENTER para continuar...\n"
 newline:          .asciiz "\n"
+
+# --- Strings VISUAIS ---
+str_header:       .asciiz "\n   1 2 3 4 5 6 7 8\n"
+str_line_prefix:  .asciiz " "
+sym_water:        .asciiz ". "
+sym_miss:         .asciiz "o "
+sym_hit:          .asciiz "X "
 
 inbuf:            .space 64
 board1:           .space 64
@@ -71,6 +76,74 @@ print_int:
         syscall
         jr $ra
 
+# ---------------- PRINT BOARD ----------------
+print_board_masked:
+        move $t0, $a0        
+        
+        la $a0, str_header
+        li $v0, 4
+        syscall
+
+        li $t1, 0            # Linha (0-7)
+
+pb_row_loop:
+        li $t2, 8
+        beq $t1, $t2, pb_done
+
+        # Imprime Letra
+        li $a0, 'A'
+        add $a0, $a0, $t1
+        li $v0, 11
+        syscall
+        
+        la $a0, str_line_prefix
+        li $v0, 4
+        syscall
+
+        li $t3, 0            # Coluna (0-7)
+
+pb_col_loop:
+        li $t2, 8
+        beq $t3, $t2, pb_next_row
+
+        sll $t4, $t1, 3      # row * 8
+        add $t4, $t4, $t3    # + col
+        add $t4, $t4, $t0    # + Base
+        
+        lb $t5, 0($t4)       
+
+        li $t6, 2
+        beq $t5, $t6, print_miss
+        li $t6, 3
+        beq $t5, $t6, print_hit
+        j print_water        # Esconde navios (1 vira água)
+
+print_water:
+        la $a0, sym_water
+        j do_print_sym
+print_miss:
+        la $a0, sym_miss
+        j do_print_sym
+print_hit:
+        la $a0, sym_hit
+        j do_print_sym
+
+do_print_sym:
+        li $v0, 4
+        syscall
+        addi $t3, $t3, 1     
+        j pb_col_loop
+
+pb_next_row:
+        la $a0, newline
+        li $v0, 4
+        syscall
+        addi $t1, $t1, 1     
+        j pb_row_loop
+
+pb_done:
+        jr $ra
+
 # ---------------- parse coordinate ----------------
 parse_coord:
         la $t0, inbuf
@@ -80,14 +153,14 @@ parse_coord:
         li $t3, 'H'
         blt $t1, $t2, check_lower
         bgt $t1, $t3, check_lower
-        subu $v1, $t1, $t2
+        subu $v1, $t1, $t2   # v1 = LINHA
         j parse_row
 check_lower:
         li $t2, 'a'
         li $t3, 'h'
         blt $t1, $t2, parse_err
         bgt $t1, $t3, parse_err
-        subu $v1, $t1, $t2
+        subu $v1, $t1, $t2   # v1 = LINHA
 parse_row:
         addi $t0, $t0, 1
 skip_spaces:
@@ -107,7 +180,7 @@ got_digit:
         li $t3, '8'
         blt $t1, $t2, parse_err
         bgt $t1, $t3, parse_err
-        subu $v0, $t1, $t2
+        subu $v0, $t1, $t2   # v0 = COLUNA
         jr $ra
 parse_err:
         li $v0, -1
@@ -143,8 +216,8 @@ find_orient_done:
 # ---------------- calc_index ----------------
 calc_index:
         li $t0, 8
-        mul $t2, $a0, $t0
-        add $v0, $t2, $a1
+        mul $t2, $a0, $t0    # Row * 8
+        add $v0, $t2, $a1    # + Col
         jr $ra
 
 # ---------------- init boards ----------------
@@ -208,8 +281,11 @@ ask_place:
 
         jal parse_coord
         bltz $v0, bad_input_place
-        move $t_row, $v0
-        move $t_col, $v1
+        
+        # --- CORREÇÃO AQUI ---
+        move $t_row, $v1     # v1 é a LINHA
+        move $t_col, $v0     # v0 é a COLUNA
+        # ---------------------
 
         jal find_orient
         move $t_orient, $t0
@@ -272,9 +348,9 @@ calc_idx_write:
         move $t_index, $v0
         move $t_addr, $s0
         add $t_addr, $t_addr, $t_index
-        li $t_one, 1          # AGORA USA $t5 (t_one)
+        li $t_one, 1          
         sb $t_one, 0($t_addr)
-        addi $t_off, $t_off, 1 # $t6 incrementa sem ser destruído
+        addi $t_off, $t_off, 1 
         j write_loop
 
 place_next:
@@ -297,7 +373,7 @@ place_done:
 clear_screen:
         li $t0,0
 clear_loop:
-        beq $t0,12, clear_done
+        beq $t0,20, clear_done 
         la $a0, newline
         jal print_str
         addi $t0, $t0, 1
@@ -324,6 +400,9 @@ turn_start:
         jal print_str
         move $a0, $s4
         jal print_int
+        
+        move $a0, $s3       
+        jal print_board_masked
 
 ask_shot:
         la $a0, msg_enter_shot
@@ -334,8 +413,11 @@ ask_shot:
 
         jal parse_coord
         bltz $v0, shot_bad
-        move $t_row, $v0
-        move $t_col, $v1
+        
+        # --- CORREÇÃO AQUI TAMBÉM ---
+        move $t_row, $v1    # Linha
+        move $t_col, $v0    # Coluna
+        # ----------------------------
 
         move $a0, $t_row
         move $a1, $t_col
@@ -355,20 +437,19 @@ ask_shot:
         beq $t_cell, $t_one, do_hit
 
         # Miss
-        li $t_cell, 2          # CORREÇÃO: Usa t_cell ($t5) em vez de t_tmp ($t4)
-        sb $t_cell, 0($t_addr) # t_addr ($t4) ainda contém o endereço correto
+        li $t_cell, 2          
+        sb $t_cell, 0($t_addr) 
         la $a0, msg_miss
         jal print_str
         j after_shot
 
 do_hit:
         # Hit
-        li $t_cell, 3          # CORREÇÃO: Usa t_cell ($t5)
+        li $t_cell, 3          
         sb $t_cell, 0($t_addr)
         la $a0, msg_hit
         jal print_str
         
-        # Agora podemos usar t_tmp ($t4) para calcular
         lw $t_tmp, 0($s5)
         addi $t_tmp, $t_tmp, -1
         sw $t_tmp, 0($s5)
@@ -376,11 +457,16 @@ do_hit:
         j after_shot
 
 after_shot:
+        move $a0, $s3
+        jal print_board_masked
+
         la $a0, ask_continue
         jal print_str
         la $a0, inbuf
         li $a1, 8
         jal read_line
+
+        jal clear_screen 
 
         beq $s4, 1, set_p2
         li $s4, 1
@@ -400,6 +486,9 @@ shot_bad:
         j ask_shot
 
 declare_winner:
+        move $a0, $s3
+        jal print_board_masked
+        
         la $a0, msg_winner
         jal print_str
         move $a0, $s4
@@ -430,6 +519,7 @@ main:
         la $s0, board2
         jal place_all_ships
 
+        jal clear_screen 
         jal game_loop
 
         li $v0,10
