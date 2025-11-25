@@ -1,12 +1,12 @@
-# Batalha Naval - MIPS (MARS) - Versão Final Corrigida v2
+# Batalha Naval - MIPS (MARS) - Versão Final v3
 # 2 jogadores, tabuleiros 8x8, navios 4,3,2
-# Correção: Erro de Runtime Address 0x0 resolvido (Conflito de $s5).
+# Correção v3: Separação de registradores $t_cell e $t_one (Bug do "Sempre Acerta" resolvido).
 
 # --- BLOCO DE DEFINIÇÕES (.eqv) ---
 .eqv $t_idx    $s1  # Índice do navio atual
 .eqv $t_ships  $s3  # Endereço do array 'ships'
 .eqv $t_size   $s4  # Tamanho do navio atual
-.eqv $t_row    $s5  # Linha (Usa $s5)
+.eqv $t_row    $s5  # Linha
 .eqv $t_col    $s6  # Coluna
 .eqv $t_orient $s7  # Orientação
 
@@ -14,10 +14,14 @@
 .eqv $t_tmp    $t4  
 .eqv $t_addr   $t4  
 .eqv $t_a      $t4  
+
 .eqv $t_val    $t5  
-.eqv $t_cell   $t5  
-.eqv $t_one    $t5  
+.eqv $t_cell   $t5  # Valor lido da memória ($t5)
 .eqv $t_const  $t5  
+
+# --- CORREÇÃO DO BUG AQUI ---
+.eqv $t_one    $t3  # Agora usa $t3 (antes conflitava com $t5)
+
 .eqv $t_off    $t6  
 .eqv $t_r2     $t7  
 .eqv $t_c2     $t8  
@@ -391,12 +395,12 @@ game_loop_top:
         beq $s4, 1, setup_p1
         la $s0, board2
         la $s3, board1
-        la $s2, ships_left1   # CORREÇÃO: Usar $s2 em vez de $s5
+        la $s2, ships_left1   
         j turn_start
 setup_p1:
         la $s0, board1
         la $s3, board2
-        la $s2, ships_left2   # CORREÇÃO: Usar $s2 em vez de $s5
+        la $s2, ships_left2   
 
 turn_start:
         la $a0, msg_turn
@@ -417,8 +421,8 @@ ask_shot:
         jal parse_coord
         bltz $v0, shot_bad
         
-        move $t_row, $v1    # Linha ($s5 - sobrescrevia o ponteiro antes)
-        move $t_col, $v0    # Coluna
+        move $t_row, $v1    
+        move $t_col, $v0    
 
         move $a0, $t_row
         move $a1, $t_col
@@ -434,8 +438,10 @@ ask_shot:
         li $t2, 3
         beq $t_cell, $t2, already_shot
 
-        li $t_one, 1
-        beq $t_cell, $t_one, do_hit
+        # --- AQUI AGORA USA $t3 PARA COMPARAR ---
+        li $t_one, 1             
+        beq $t_cell, $t_one, do_hit  
+        # -----------------------------
 
         # Miss
         li $t_cell, 2          
@@ -451,7 +457,6 @@ do_hit:
         la $a0, msg_hit
         jal print_str
         
-        # CORREÇÃO: Usar $s2 para acessar ships_left
         lw $t_tmp, 0($s2)
         addi $t_tmp, $t_tmp, -1
         sw $t_tmp, 0($s2)
