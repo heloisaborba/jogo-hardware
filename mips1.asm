@@ -1,12 +1,12 @@
-# Batalha Naval - MIPS (MARS) - Versão Final Corrigida
+# Batalha Naval - MIPS (MARS) - Versão Final Corrigida v2
 # 2 jogadores, tabuleiros 8x8, navios 4,3,2
-# Correção: Leitura de coordenadas (Linha/Coluna) corrigida.
+# Correção: Erro de Runtime Address 0x0 resolvido (Conflito de $s5).
 
 # --- BLOCO DE DEFINIÇÕES (.eqv) ---
 .eqv $t_idx    $s1  # Índice do navio atual
 .eqv $t_ships  $s3  # Endereço do array 'ships'
 .eqv $t_size   $s4  # Tamanho do navio atual
-.eqv $t_row    $s5  # Linha
+.eqv $t_row    $s5  # Linha (Usa $s5)
 .eqv $t_col    $s6  # Coluna
 .eqv $t_orient $s7  # Orientação
 
@@ -282,10 +282,8 @@ ask_place:
         jal parse_coord
         bltz $v0, bad_input_place
         
-        # --- CORREÇÃO AQUI ---
         move $t_row, $v1     # v1 é a LINHA
         move $t_col, $v0     # v0 é a COLUNA
-        # ---------------------
 
         jal find_orient
         move $t_orient, $t0
@@ -371,6 +369,9 @@ place_done:
 
 # ---------------- clear screen ----------------
 clear_screen:
+        addi $sp, $sp, -4
+        sw $ra, 0($sp)
+        
         li $t0,0
 clear_loop:
         beq $t0,20, clear_done 
@@ -379,6 +380,8 @@ clear_loop:
         addi $t0, $t0, 1
         j clear_loop
 clear_done:
+        lw $ra, 0($sp)
+        addi $sp, $sp, 4
         jr $ra
 
 # ---------------- game loop ----------------
@@ -388,12 +391,12 @@ game_loop_top:
         beq $s4, 1, setup_p1
         la $s0, board2
         la $s3, board1
-        la $s5, ships_left1
+        la $s2, ships_left1   # CORREÇÃO: Usar $s2 em vez de $s5
         j turn_start
 setup_p1:
         la $s0, board1
         la $s3, board2
-        la $s5, ships_left2
+        la $s2, ships_left2   # CORREÇÃO: Usar $s2 em vez de $s5
 
 turn_start:
         la $a0, msg_turn
@@ -401,7 +404,7 @@ turn_start:
         move $a0, $s4
         jal print_int
         
-        move $a0, $s3       
+        move $a0, $s3        
         jal print_board_masked
 
 ask_shot:
@@ -414,10 +417,8 @@ ask_shot:
         jal parse_coord
         bltz $v0, shot_bad
         
-        # --- CORREÇÃO AQUI TAMBÉM ---
-        move $t_row, $v1    # Linha
+        move $t_row, $v1    # Linha ($s5 - sobrescrevia o ponteiro antes)
         move $t_col, $v0    # Coluna
-        # ----------------------------
 
         move $a0, $t_row
         move $a1, $t_col
@@ -450,9 +451,10 @@ do_hit:
         la $a0, msg_hit
         jal print_str
         
-        lw $t_tmp, 0($s5)
+        # CORREÇÃO: Usar $s2 para acessar ships_left
+        lw $t_tmp, 0($s2)
         addi $t_tmp, $t_tmp, -1
-        sw $t_tmp, 0($s5)
+        sw $t_tmp, 0($s2)
         beqz $t_tmp, declare_winner
         j after_shot
 
